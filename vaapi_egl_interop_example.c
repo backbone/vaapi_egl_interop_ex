@@ -95,12 +95,15 @@ static void resize_window(int screen_width, int screen_height, const AVCodecCont
                display_width, display_height);
 }
 
-
-int main(int argc, char* argv[]) {
+void show_help(int argc, char* argv[]) {
     if (argc < 2) {
         fprintf(stderr, "Usage: %s <input.mp4> [/dev/dri/renderDxxx]\n", argv[0]);
-        return 2;
+        exit(2);
     }
+}
+
+int main(int argc, char* argv[]) {
+	show_help(argc, argv);
 
     // open X11 display
     Display *x_display;
