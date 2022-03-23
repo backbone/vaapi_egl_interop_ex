@@ -48,8 +48,6 @@ SOFTWARE.
                             // 1 = derive VA-API display from DRM render node
 #define MANUAL_VA_INIT   1  // 0 = let FFmpeg handle VA-API initialization
                             // 1 = initialize VA-API manually
-#define USE_EGL          1  // 0 = use GLX to create the OpenGL context (*)
-                            // 1 = use EGL to create the OpenGL context
 #define USE_CORE_PROFILE 1  // 0 = request and use compatibility profile
                             // 1 = request and use core profile
                             // 2 = request compat, but only use core functions
@@ -102,11 +100,6 @@ SOFTWARE.
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
-
-#if !USE_EGL
-    #include <GL/glx.h>
-    #include <GL/glxext.h>
-#endif
 
 #include <GL/gl.h>
 #include <GL/glext.h>
@@ -281,68 +274,7 @@ int main(int argc, char* argv[]) {
         fail("eglBindAPI");
     }
 
-    // create the OpenGL rendering context using GLX
-#if !USE_EGL
-    GLXContext glx_context;
-    GLXFBConfig *fbconfigs;
-    int visual_attr[] = {
-        GLX_DRAWABLE_TYPE, GLX_WINDOW_BIT,
-        GLX_RENDER_TYPE,   GLX_RGBA_BIT,
-        GLX_RED_SIZE,      8,
-        GLX_GREEN_SIZE,    8,
-        GLX_BLUE_SIZE,     8,
-        GLX_ALPHA_SIZE,    8,
-        GLX_DEPTH_SIZE,    0,
-        GLX_STENCIL_SIZE,  0,
-        GLX_DOUBLEBUFFER,  True,
-        None
-    };
-    int cfg_count;
-    fbconfigs = glXChooseFBConfig(x_display, DefaultScreen(x_display), visual_attr, &cfg_count);
-    if (!fbconfigs || (cfg_count < 1)) {
-        fail("glXChooseFBConfig");
-    }
-    PFNGLXCREATECONTEXTATTRIBSARBPROC glXCreateContextAttribsARB = (PFNGLXCREATECONTEXTATTRIBSARBPROC) glXGetProcAddressARB((const GLubyte*)"glXCreateContextAttribsARB");
-    if (!glXCreateContextAttribsARB) {
-        fail("glXGetProcAddressARB(glXCreateContextAttribsARB)");
-    }
-    int ctx_attr[] = {
-        #if USE_CORE_PROFILE & 1
-            GLX_CONTEXT_PROFILE_MASK_ARB,  GLX_CONTEXT_CORE_PROFILE_BIT_ARB,
-            GLX_CONTEXT_MAJOR_VERSION_ARB, CORE_PROFILE_MAJOR_VERSION,
-            GLX_CONTEXT_MINOR_VERSION_ARB, CORE_PROFILE_MINOR_VERSION,
-        #else
-            GLX_CONTEXT_PROFILE_MASK_ARB,  GLX_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB,
-            GLX_CONTEXT_MAJOR_VERSION_ARB, COMP_PROFILE_MAJOR_VERSION,
-            GLX_CONTEXT_MINOR_VERSION_ARB, COMP_PROFILE_MINOR_VERSION,
-        #endif
-        0, 0
-    };
-    glx_context = glXCreateContextAttribsARB(x_display, fbconfigs[0], NULL, True, ctx_attr);
-    if (!glx_context) {
-        fail("glXCreateContextAttribsARB");
-    }
-    if (glXMakeCurrent(x_display, window, glx_context) != True) {
-        fail("glXMakeCurrent");
-    }
-    bool swap_ok = false;
-    PFNGLXSWAPINTERVALMESAPROC glXSwapIntervalMESA = (PFNGLXSWAPINTERVALMESAPROC) glXGetProcAddressARB((const GLubyte*)"glXSwapIntervalMESA");
-    if (!swap_ok && glXSwapIntervalMESA) {
-        swap_ok = (glXSwapIntervalMESA(SWAP_INTERVAL) == 0);
-    }
-    PFNGLXSWAPINTERVALSGIPROC glXSwapIntervalSGI = (PFNGLXSWAPINTERVALSGIPROC) glXGetProcAddressARB((const GLubyte*)"glXSwapIntervalSGI");
-    if (!swap_ok && glXSwapIntervalSGI) {
-        swap_ok = (glXSwapIntervalSGI(SWAP_INTERVAL) == 0);
-    }
-    PFNGLXSWAPINTERVALEXTPROC glXSwapIntervalEXT = (PFNGLXSWAPINTERVALEXTPROC) glXGetProcAddressARB((const GLubyte*)"glXSwapIntervalEXT");
-    if (!swap_ok && glXSwapIntervalEXT) {
-        glXSwapIntervalEXT(x_display, window, SWAP_INTERVAL);
-        swap_ok = true;
-    }
-#endif
-
     // create the OpenGL rendering context using EGL
-#if USE_EGL
     EGLSurface egl_surface;
     EGLContext egl_context;
     EGLint visual_attr[] = {
@@ -382,7 +314,6 @@ int main(int argc, char* argv[]) {
     }
     eglMakeCurrent(egl_display, egl_surface, egl_surface, egl_context);
     eglSwapInterval(egl_display, SWAP_INTERVAL);
-#endif
 
     // dump OpenGL configuration (for reference)
     printf("OpenGL vendor:   %s\n", glGetString(GL_VENDOR));
@@ -657,11 +588,7 @@ int main(int argc, char* argv[]) {
         if (glGetError()) { fail("drawing"); }
 
         // display the frame
-        #if USE_EGL
-            eglSwapBuffers(egl_display, egl_surface);
-        #else
-            glXSwapBuffers(x_display, window);
-        #endif
+           eglSwapBuffers(egl_display, egl_surface);
 
         // clean up the interop images
         for (int i = 0;  i < 2;  ++i) {
@@ -685,14 +612,9 @@ int main(int argc, char* argv[]) {
     // clean up all the mess we made
     if (packet_valid) { av_packet_unref(&packet); }
     av_frame_free(&frame);
-    #if USE_EGL
-        eglMakeCurrent(egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-        eglDestroyContext(egl_display, egl_context);
-        eglDestroySurface(egl_display, egl_surface);
-    #else
-        glXMakeCurrent(x_display, window, glx_context);
-        glXDestroyContext(x_display, glx_context);
-    #endif
+    eglMakeCurrent(egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+    eglDestroyContext(egl_display, egl_context);
+    eglDestroySurface(egl_display, egl_surface);
     eglTerminate(egl_display);
     XDestroyWindow(x_display, window);
     XCloseDisplay(x_display);
