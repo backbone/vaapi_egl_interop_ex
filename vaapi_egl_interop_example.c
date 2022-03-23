@@ -17,8 +17,6 @@ can decode the frames, or at VSync rate).
 
 // configuration section: switch between the many parts that are implemented
 // in two or more possible ways in this program
-#define MANUAL_VA_INIT   1  // 0 = let FFmpeg handle VA-API initialization
-                            // 1 = initialize VA-API manually
 #define USE_CORE_PROFILE 1  // 0 = request and use compatibility profile
                             // 1 = request and use core profile
                             // 2 = request compat, but only use core functions
@@ -125,16 +123,14 @@ int main(int argc, char* argv[]) {
     // initialize VA-API
     int drm_fd = -1;
     VADisplay va_display = 0;
-    #if MANUAL_VA_INIT  // don't init VA-API here if we let FFmpeg do it for us
-        va_display = vaGetDisplay(x_display);
-        if (!va_display) {
-            fail("vaGetDisplay");
-        }
-        int major, minor;
-        if (vaInitialize(va_display, &major, &minor) != VA_STATUS_SUCCESS) {
-            fail("vaInitialize");
-        }
-    #endif
+    va_display = vaGetDisplay(x_display);
+    if (!va_display) {
+        fail("vaGetDisplay");
+    }
+    int major, minor;
+    if (vaInitialize(va_display, &major, &minor) != VA_STATUS_SUCCESS) {
+        fail("vaInitialize");
+    }
 
 	// TODO FROM HERE
     // open input file, video stream and decoder
@@ -163,7 +159,6 @@ int main(int argc, char* argv[]) {
     if (avcodec_parameters_to_context(decoder_ctx, input_ctx->streams[video_stream]->codecpar) < 0) {
         fail("avcodec_parameters_to_context");
     }
-#if MANUAL_VA_INIT
     // use av_hwdevice_ctx_alloc() and populate the underlying structure
     // to use the VA-API context ("display") we created before
     hw_device_ctx = av_hwdevice_ctx_alloc(AV_HWDEVICE_TYPE_VAAPI);
@@ -176,15 +171,6 @@ int main(int argc, char* argv[]) {
     if (av_hwdevice_ctx_init(hw_device_ctx) < 0) {
         fail("av_hwdevice_ctx_init");
     }
-#else
-    // use av_hwdevice_ctx_create() and let FFmpeg handle all the details
-    if (av_hwdevice_ctx_create(&hw_device_ctx, AV_HWDEVICE_TYPE_VAAPI, NULL, NULL, 0) < 0) {
-        fail("av_hwdevice_ctx_create");
-    }
-    const AVHWDeviceContext *hwctx = (void*) hw_device_ctx->data;
-    const AVVAAPIDeviceContext *vactx = hwctx->hwctx;
-    va_display = vactx->display;
-#endif
     decoder_ctx->get_format = get_hw_format;
     decoder_ctx->hw_device_ctx = av_buffer_ref(hw_device_ctx);
     if (avcodec_open2(decoder_ctx, decoder, NULL) < 0) {
@@ -571,9 +557,7 @@ int main(int argc, char* argv[]) {
     avformat_close_input(&input_ctx);
     av_buffer_unref(&hw_device_ctx);
     if (drm_fd >= 0) { close(drm_fd); }
-    #if MANUAL_VA_INIT
-        vaTerminate(va_display);
-    #endif
+    vaTerminate(va_display);
 	// TODO: TO HERE
     printf("\nBye.\n");
     return 0;
