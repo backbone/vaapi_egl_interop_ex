@@ -112,12 +112,8 @@ Display* open_x11_display() {
     return x_display;
 }
 
-int main(int argc, char* argv[]) {
-	show_help(argc, argv);
-	Display* x_display = open_x11_display();
-
+VADisplay initialize_vaapi(Display* x_display) {
     // initialize VA-API
-    int drm_fd = -1;
     VADisplay va_display = 0;
     va_display = vaGetDisplay(x_display);
     if (!va_display) {
@@ -127,8 +123,14 @@ int main(int argc, char* argv[]) {
     if (vaInitialize(va_display, &major, &minor) != VA_STATUS_SUCCESS) {
         fail("vaInitialize");
     }
+    return va_display;
+}
 
-	// TODO FROM HERE
+int main(int argc, char* argv[]) {
+	show_help(argc, argv);
+	Display* x_display = open_x11_display();
+	VADisplay va_display = initialize_vaapi(x_display);
+
     // open input file, video stream and decoder
     AVFormatContext *input_ctx = NULL;
     AVCodec *decoder = NULL;
@@ -498,7 +500,6 @@ int main(int argc, char* argv[]) {
     avcodec_free_context(&decoder_ctx);
     avformat_close_input(&input_ctx);
     av_buffer_unref(&hw_device_ctx);
-    if (drm_fd >= 0) { close(drm_fd); }
     vaTerminate(va_display);
 	// TODO: TO HERE
     printf("\nBye.\n");
