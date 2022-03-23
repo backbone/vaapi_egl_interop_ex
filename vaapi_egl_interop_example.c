@@ -19,8 +19,6 @@ can decode the frames, or at VSync rate).
 // in two or more possible ways in this program
 #define USE_LAYERS       1  // 0 = use VA_EXPORT_SURFACE_COMPOSED_LAYERS
                             // 1 = use VA_EXPORT_SURFACE_SEPARATE_LAYERS
-#define REUSE_TEXTURES   1  // 0 = create new OpenGL textures every frame
-                            // 1 = re-use same OpenGL textures for all frames
 #define CLOSE_EARLY      1  // 0 = close FDs after drawing the frame
                             // 1 = close DRM-PRIME FDs as soon as possible
 #define SWAP_INTERVAL    2  // 0 = decode and display as fast as possible
@@ -306,14 +304,12 @@ int main(int argc, char* argv[]) {
 
     // OpenGL texture setup
     GLuint textures[2];
-    #if REUSE_TEXTURES
-        glGenTextures(2, textures);
-        for (int i = 0;  i < 2;  ++i) {
-            glBindTexture(GL_TEXTURE_2D, textures[i]);
-            setup_texture();
-        }
-        glBindTexture(GL_TEXTURE_2D, 0);
-    #endif
+    glGenTextures(2, textures);
+    for (int i = 0;  i < 2;  ++i) {
+        glBindTexture(GL_TEXTURE_2D, textures[i]);
+        setup_texture();
+    }
+    glBindTexture(GL_TEXTURE_2D, 0);
 
     // initial window size setup
     GLint vp[4];
@@ -428,9 +424,6 @@ int main(int argc, char* argv[]) {
 
         // import the frame into OpenGL
         EGLImage images[2];
-        #if !REUSE_TEXTURES
-            glGenTextures(2, textures);
-        #endif
         for (int i = 0;  i < 2;  ++i) {
             static const uint32_t formats[2] = { DRM_FORMAT_R8, DRM_FORMAT_GR88 };
             #if USE_LAYERS
@@ -458,9 +451,6 @@ int main(int argc, char* argv[]) {
             }
             glActiveTexture(GL_TEXTURE0 + i);
             glBindTexture(GL_TEXTURE_2D, textures[i]);
-            #if !REUSE_TEXTURES
-                setup_texture();
-            #endif
             while (glGetError()) {}
             glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, images[i]);
             if (glGetError()) {
@@ -488,9 +478,6 @@ int main(int argc, char* argv[]) {
             glBindTexture(GL_TEXTURE_2D, 0);
             eglDestroyImageKHR(egl_display, images[i]);
         }
-        #if !REUSE_TEXTURES
-            glDeleteTextures(2, textures);
-        #endif
         #if !CLOSE_EARLY
             for (int i = 0;  i < (int)prime.num_objects;  ++i) {
                 close(prime.objects[i].fd);
