@@ -17,9 +17,6 @@ can decode the frames, or at VSync rate).
 
 // configuration section: switch between the many parts that are implemented
 // in two or more possible ways in this program
-#define USE_CORE_PROFILE 1  // 0 = request and use compatibility profile
-                            // 1 = request and use core profile
-                            // 2 = request compat, but only use core functions
 #define USE_LAYERS       1  // 0 = use VA_EXPORT_SURFACE_COMPOSED_LAYERS
                             // 1 = use VA_EXPORT_SURFACE_SEPARATE_LAYERS
 #define REUSE_TEXTURES   1  // 0 = create new OpenGL textures every frame
@@ -34,10 +31,6 @@ can decode the frames, or at VSync rate).
 // request OpenGL 3.3 for Core Profile
 #define CORE_PROFILE_MAJOR_VERSION 3
 #define CORE_PROFILE_MINOR_VERSION 3
-// request OpenGL 3.0 for Compatibility Profile
-#define COMP_PROFILE_MAJOR_VERSION 3
-#define COMP_PROFILE_MINOR_VERSION 0
-
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -232,15 +225,9 @@ int main(int argc, char* argv[]) {
     }
     EGLint ctx_attr[] = {
         EGL_CONTEXT_OPENGL_PROFILE_MASK,
-            #if USE_CORE_PROFILE & 1
-                EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT,
-                EGL_CONTEXT_MAJOR_VERSION, CORE_PROFILE_MAJOR_VERSION,
-                EGL_CONTEXT_MINOR_VERSION, CORE_PROFILE_MINOR_VERSION,
-            #else
-                EGL_CONTEXT_OPENGL_COMPATIBILITY_PROFILE_BIT,
-                EGL_CONTEXT_MAJOR_VERSION, COMP_PROFILE_MAJOR_VERSION,
-                EGL_CONTEXT_MINOR_VERSION, COMP_PROFILE_MINOR_VERSION,
-            #endif
+            EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT,
+            EGL_CONTEXT_MAJOR_VERSION, CORE_PROFILE_MAJOR_VERSION,
+            EGL_CONTEXT_MINOR_VERSION, CORE_PROFILE_MINOR_VERSION,
         EGL_NONE
     };
     egl_context = eglCreateContext(egl_display, cfg, EGL_NO_CONTEXT, ctx_attr);
@@ -262,10 +249,8 @@ int main(int argc, char* argv[]) {
     LOOKUP_FUNCTION(PFNEGLCREATEIMAGEKHRPROC,            eglCreateImageKHR)
     LOOKUP_FUNCTION(PFNEGLDESTROYIMAGEKHRPROC,           eglDestroyImageKHR)
     LOOKUP_FUNCTION(PFNGLEGLIMAGETARGETTEXTURE2DOESPROC, glEGLImageTargetTexture2DOES)
-    #if USE_CORE_PROFILE
     LOOKUP_FUNCTION(PFNGLGENVERTEXARRAYSPROC,            glGenVertexArrays);
     LOOKUP_FUNCTION(PFNGLBINDVERTEXARRAYPROC,            glBindVertexArray);
-    #endif
 
     // OpenGL shader setup
     #define DECLARE_YUV2RGB_MATRIX_GLSL \
@@ -275,45 +260,29 @@ int main(int argc, char* argv[]) {
         "    vec4(  1.7927, -0.5329,  0.0000,  0.0000 ),\n" \
         "    vec4( -0.9729,  0.3015, -1.1334,  1.0000 ));"
 
-    #if USE_CORE_PROFILE
-        GLuint vao;                   // OpenGL Core Profile requires
-        glGenVertexArrays(1, &vao);   // using VAOs even in trivial cases,
-        glBindVertexArray(vao);       // so let's set up a dummy VAO
-        const char *vs_src =
-                 "#version 130"
-            "\n" "const vec2 coords[4] = vec2[]( vec2(0.,0.), vec2(1.,0.), vec2(0.,1.), vec2(1.,1.) );"
-            "\n" "uniform vec2 uTexCoordScale;"
-            "\n" "out vec2 vTexCoord;"
-            "\n" "void main() {"
-            "\n" "    vec2 c = coords[gl_VertexID];"
-            "\n" "    vTexCoord = c * uTexCoordScale;"
-            "\n" "    gl_Position = vec4(c * vec2(2.,-2.) + vec2(-1.,1.), 0., 1.);"
-            "\n" "}";
-        const char *fs_src =
-                 "#version 130"
-            "\n" "in vec2 vTexCoord;"
-            "\n" "uniform sampler2D uTexY, uTexC;"
-            "\n" DECLARE_YUV2RGB_MATRIX_GLSL
-            "\n" "out vec4 oColor;"
-            "\n" "void main() {"
-            "\n" "    oColor = yuv2rgb * vec4(texture(uTexY, vTexCoord).x, "
-                                             "texture(uTexC, vTexCoord).xy, 1.);"
-            "\n" "}";
-    #else
-        glOrtho(0.0, 1.0,  1.0, 0.0,  -1.0, 1.0);
-        const char *vs_src =
-                 "void main() {"
-            "\n" "    gl_Position = ftransform();"
-            "\n" "    gl_TexCoord[0] = gl_MultiTexCoord0;"
-            "\n" "}";
-        const char *fs_src =
-                 "uniform sampler2D uTexY, uTexC;"
-            "\n" DECLARE_YUV2RGB_MATRIX_GLSL
-            "\n" "void main() {"
-            "\n" "    gl_FragColor = yuv2rgb * vec4(texture2D(uTexY, gl_TexCoord[0].xy).x, "
-                                                   "texture2D(uTexC, gl_TexCoord[0].xy).xy, 1.);"
-            "\n" "}";
-    #endif
+    GLuint vao;                   // OpenGL Core Profile requires
+    glGenVertexArrays(1, &vao);   // using VAOs even in trivial cases,
+    glBindVertexArray(vao);       // so let's set up a dummy VAO
+    const char *vs_src =
+             "#version 130"
+        "\n" "const vec2 coords[4] = vec2[]( vec2(0.,0.), vec2(1.,0.), vec2(0.,1.), vec2(1.,1.) );"
+        "\n" "uniform vec2 uTexCoordScale;"
+        "\n" "out vec2 vTexCoord;"
+        "\n" "void main() {"
+        "\n" "    vec2 c = coords[gl_VertexID];"
+        "\n" "    vTexCoord = c * uTexCoordScale;"
+        "\n" "    gl_Position = vec4(c * vec2(2.,-2.) + vec2(-1.,1.), 0., 1.);"
+        "\n" "}";
+    const char *fs_src =
+             "#version 130"
+        "\n" "in vec2 vTexCoord;"
+        "\n" "uniform sampler2D uTexY, uTexC;"
+        "\n" DECLARE_YUV2RGB_MATRIX_GLSL
+        "\n" "out vec4 oColor;"
+        "\n" "void main() {"
+        "\n" "    oColor = yuv2rgb * vec4(texture(uTexY, vTexCoord).x, "
+                                         "texture(uTexC, vTexCoord).xy, 1.);"
+        "\n" "}";
     GLuint prog = glCreateProgram();
     GLuint vs = glCreateShader(GL_VERTEX_SHADER);
     GLuint fs = glCreateShader(GL_FRAGMENT_SHADER);
@@ -453,9 +422,7 @@ int main(int argc, char* argv[]) {
         if (!texture_size_valid) {
             texcoord_x1 = (float)((double) decoder_ctx->width  / (double) prime.width);
             texcoord_y1 = (float)((double) decoder_ctx->height / (double) prime.height);
-            #if USE_CORE_PROFILE
-                glUniform2f(glGetUniformLocation(prog, "uTexCoordScale"), texcoord_x1, texcoord_y1);
-            #endif
+            glUniform2f(glGetUniformLocation(prog, "uTexCoordScale"), texcoord_x1, texcoord_y1);
             texture_size_valid = true;
         }
 
@@ -509,17 +476,7 @@ int main(int argc, char* argv[]) {
         // draw the frame
         glClear(GL_COLOR_BUFFER_BIT);
         while (glGetError()) {}
-        #if USE_CORE_PROFILE
-            glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-        #else
-            glActiveTexture(GL_TEXTURE0);
-            glBegin(GL_QUADS);
-            glTexCoord2f(       0.0f, 0.0f);         glVertex2i(0 ,0);
-            glTexCoord2f(texcoord_x1, 0.0f);         glVertex2i(1, 0);
-            glTexCoord2f(texcoord_x1, texcoord_y1);  glVertex2i(1, 1);
-            glTexCoord2f(       0.0f, texcoord_y1);  glVertex2i(0, 1);
-            glEnd();
-        #endif
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
         if (glGetError()) { fail("drawing"); }
 
         // display the frame
