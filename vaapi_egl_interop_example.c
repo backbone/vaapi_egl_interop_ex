@@ -126,27 +126,18 @@ VADisplay initialize_vaapi(Display* x_display) {
     return va_display;
 }
 
-int main(int argc, char* argv[]) {
-	show_help(argc, argv);
-	Display* x_display = open_x11_display();
-	VADisplay va_display = initialize_vaapi(x_display);
-
-    // open input file, video stream and decoder
-    AVFormatContext *input_ctx = NULL;
-    AVCodec *decoder = NULL;
-    AVCodecContext *decoder_ctx = NULL;
-    AVBufferRef *hw_device_ctx = NULL;
-    int video_stream = -1;
+// open input file, video stream and decoder
+int open_source(const char *src_path, AVFormatContext *input_ctx, AVCodec *decoder, AVCodecContext *decoder_ctx) {
     #if LIBAVFORMAT_VERSION_INT < AV_VERSION_INT(58, 9, 100)
         av_register_all();
     #endif
-    if (avformat_open_input(&input_ctx, argv[1], NULL, NULL) != 0) {
+    if (avformat_open_input(&input_ctx, src_path, NULL, NULL) != 0) {
         fail("avformat_open_input");
     }
     if (avformat_find_stream_info(input_ctx, NULL) < 0) {
         fail("avformat_find_stream_info");
     }
-    video_stream = av_find_best_stream(input_ctx, AVMEDIA_TYPE_VIDEO, -1, -1, &decoder, 0);
+    int video_stream = av_find_best_stream(input_ctx, AVMEDIA_TYPE_VIDEO, -1, -1, &decoder, 0);
     if (video_stream < 0) {
         fail("av_find_best_stream");
     }
@@ -157,6 +148,20 @@ int main(int argc, char* argv[]) {
     if (avcodec_parameters_to_context(decoder_ctx, input_ctx->streams[video_stream]->codecpar) < 0) {
         fail("avcodec_parameters_to_context");
     }
+    return video_stream;
+}
+
+int main(int argc, char* argv[]) {
+	show_help(argc, argv);
+	Display* x_display = open_x11_display();
+	VADisplay va_display = initialize_vaapi(x_display);
+    AVCodecContext *decoder_ctx = NULL;
+    AVCodec *decoder = NULL;
+    AVFormatContext *input_ctx = NULL;
+    int video_stream = open_source(argv[1], input_ctx, decoder, decoder_ctx);
+
+    AVBufferRef *hw_device_ctx = NULL;
+
     // use av_hwdevice_ctx_alloc() and populate the underlying structure
     // to use the VA-API context ("display") we created before
     hw_device_ctx = av_hwdevice_ctx_alloc(AV_HWDEVICE_TYPE_VAAPI);
