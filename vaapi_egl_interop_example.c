@@ -17,8 +17,6 @@ can decode the frames, or at VSync rate).
 
 // configuration section: switch between the many parts that are implemented
 // in two or more possible ways in this program
-#define USE_VA_DRM       0  // 0 = derive VA-API display from X11 display
-                            // 1 = derive VA-API display from DRM render node
 #define MANUAL_VA_INIT   1  // 0 = let FFmpeg handle VA-API initialization
                             // 1 = initialize VA-API manually
 #define USE_CORE_PROFILE 1  // 0 = request and use compatibility profile
@@ -58,11 +56,7 @@ can decode the frames, or at VSync rate).
 #include <libavutil/hwcontext_vaapi.h>
 
 #include <va/va.h>
-#if USE_VA_DRM
-    #include <va/va_drm.h>
-#else
-    #include <va/va_x11.h>
-#endif
+#include <va/va_x11.h>
 #include <va/va_drmcommon.h>
 
 #include <drm_fourcc.h>
@@ -129,22 +123,10 @@ int main(int argc, char* argv[]) {
     }
 
     // initialize VA-API
-    #if USE_VA_DRM
-        const char *drm_node = (argc > 2) ? argv[2] : "/dev/dri/renderD128";
-        printf("using VA-API device '%s'\n", drm_node);
-    #endif
     int drm_fd = -1;
     VADisplay va_display = 0;
     #if MANUAL_VA_INIT  // don't init VA-API here if we let FFmpeg do it for us
-        #if USE_VA_DRM
-            drm_fd = open(drm_node, O_RDWR);
-            if (drm_fd < 0) {
-                fail("open(DRI_render_node)");
-            }
-            va_display = vaGetDisplayDRM(drm_fd);
-        #else
-            va_display = vaGetDisplay(x_display);
-        #endif
+        va_display = vaGetDisplay(x_display);
         if (!va_display) {
             fail("vaGetDisplay");
         }
@@ -196,13 +178,7 @@ int main(int argc, char* argv[]) {
     }
 #else
     // use av_hwdevice_ctx_create() and let FFmpeg handle all the details
-    if (av_hwdevice_ctx_create(&hw_device_ctx, AV_HWDEVICE_TYPE_VAAPI, 
-        #if USE_VA_DRM
-            drm_node,
-        #else
-            NULL,
-        #endif
-    NULL, 0) < 0) {
+    if (av_hwdevice_ctx_create(&hw_device_ctx, AV_HWDEVICE_TYPE_VAAPI, NULL, NULL, 0) < 0) {
         fail("av_hwdevice_ctx_create");
     }
     const AVHWDeviceContext *hwctx = (void*) hw_device_ctx->data;
