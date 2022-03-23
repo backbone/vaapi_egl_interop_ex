@@ -102,15 +102,19 @@ void show_help(int argc, char* argv[]) {
     }
 }
 
-int main(int argc, char* argv[]) {
-	show_help(argc, argv);
-
+Display* open_x11_display() {
     // open X11 display
     Display *x_display;
     x_display = XOpenDisplay(NULL);
     if (!x_display) {
         fail("XOpenDisplay");
     }
+    return x_display;
+}
+
+int main(int argc, char* argv[]) {
+	show_help(argc, argv);
+	Display* x_display = open_x11_display();
 
     // initialize VA-API
     int drm_fd = -1;
