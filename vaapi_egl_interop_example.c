@@ -19,8 +19,6 @@ can decode the frames, or at VSync rate).
 // in two or more possible ways in this program
 #define USE_LAYERS       1  // 0 = use VA_EXPORT_SURFACE_COMPOSED_LAYERS
                             // 1 = use VA_EXPORT_SURFACE_SEPARATE_LAYERS
-#define CLOSE_EARLY      1  // 0 = close FDs after drawing the frame
-                            // 1 = close DRM-PRIME FDs as soon as possible
 #define SWAP_INTERVAL    2  // 0 = decode and display as fast as possible
                             // 1 = run at VSync framerate (typically 60 Hz)
                             // 2 = run at half VSync framerate (30 Hz)
@@ -457,11 +455,9 @@ int main(int argc, char* argv[]) {
                 fail("glEGLImageTargetTexture2DOES");
             }
         }
-        #if CLOSE_EARLY
-            for (int i = 0;  i < (int)prime.num_objects;  ++i) {
-                close(prime.objects[i].fd);
-            }
-        #endif
+        for (int i = 0;  i < (int)prime.num_objects;  ++i) {
+            close(prime.objects[i].fd);
+        }
 
         // draw the frame
         glClear(GL_COLOR_BUFFER_BIT);
@@ -478,11 +474,6 @@ int main(int argc, char* argv[]) {
             glBindTexture(GL_TEXTURE_2D, 0);
             eglDestroyImageKHR(egl_display, images[i]);
         }
-        #if !CLOSE_EARLY
-            for (int i = 0;  i < (int)prime.num_objects;  ++i) {
-                close(prime.objects[i].fd);
-            }
-        #endif
     }
 
     // normally, we'd flush the decoder here to ensure we've shown *all* frames
