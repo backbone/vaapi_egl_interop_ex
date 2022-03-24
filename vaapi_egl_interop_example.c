@@ -126,6 +126,7 @@ VADisplay initialize_vaapi(Display* x_display) {
     return va_display;
 }
 
+// open input file, video stream and decoder
 void open_source(AVCodecContext **decoder_ctx, int *video_stream, char* argv[], AVFormatContext **input_ctx, AVCodec **decoder)
 {
   #if LIBAVFORMAT_VERSION_INT < AV_VERSION_INT(58, 9, 100)
@@ -170,12 +171,32 @@ void populate_context(AVCodec *decoder, VADisplay va_display, AVCodecContext *de
   printf("Opened input video stream: %dx%d\n", decoder_ctx->width, decoder_ctx->height);
 }
 
+Atom create_x11_window(Display* x_display, AVCodecContext *decoder_ctx, Window *window)
+{
+  XSetWindowAttributes xattr;
+  xattr.override_redirect = False;
+  xattr.border_pixel = 0;
+  *window = XCreateWindow(x_display, DefaultRootWindow(x_display),
+           0, 0, decoder_ctx->width, decoder_ctx->height,
+           0, CopyFromParent, InputOutput, CopyFromParent,
+           CWOverrideRedirect | CWBorderPixel, &xattr);
+  if (!*window) {
+      fail("XCreateWindow");
+  }
+  XStoreName(x_display, *window, "VA-API EGL Interop Test");
+  XMapWindow(x_display, *window);
+  XSelectInput(x_display, *window, ExposureMask | StructureNotifyMask | KeyPressMask);
+  Atom WM_DELETE_WINDOW = XInternAtom(x_display, "WM_DELETE_WINDOW", True);
+  XSetWMProtocols(x_display, *window, &WM_DELETE_WINDOW, 1);
+
+  return WM_DELETE_WINDOW;
+}
+
 int main(int argc, char* argv[]) {
 	show_help(argc, argv);
 	Display* x_display = open_x11_display();
 	VADisplay va_display = initialize_vaapi(x_display);
 
-    // open input file, video stream and decoder
     AVFormatContext *input_ctx = NULL;
     AVCodec *decoder = NULL;
     AVCodecContext *decoder_ctx = NULL;
@@ -188,21 +209,7 @@ int main(int argc, char* argv[]) {
 
     // create X11 window
     Window window;
-    XSetWindowAttributes xattr;
-    xattr.override_redirect = False;
-    xattr.border_pixel = 0;
-    window = XCreateWindow(x_display, DefaultRootWindow(x_display),
-             0, 0, decoder_ctx->width, decoder_ctx->height,
-             0, CopyFromParent, InputOutput, CopyFromParent,
-             CWOverrideRedirect | CWBorderPixel, &xattr);
-    if (!window) {
-        fail("XCreateWindow");
-    }
-    XStoreName(x_display, window, "VA-API EGL Interop Test");
-    XMapWindow(x_display, window);
-    XSelectInput(x_display, window, ExposureMask | StructureNotifyMask | KeyPressMask);
-    Atom WM_DELETE_WINDOW = XInternAtom(x_display, "WM_DELETE_WINDOW", True);
-    XSetWMProtocols(x_display, window, &WM_DELETE_WINDOW, 1);
+    Atom WM_DELETE_WINDOW = create_x11_window(x_display, decoder_ctx, &window);
 
     // initialize EGL
     EGLDisplay egl_display;
