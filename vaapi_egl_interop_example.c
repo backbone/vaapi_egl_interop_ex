@@ -329,6 +329,165 @@ void opengl_texture_setup(GLuint textures[2])
   glBindTexture(GL_TEXTURE_2D, 0);
 }
 
+void main_loop(Display* x_display, GLuint textures[2], EGLDisplay egl_display, VADisplay va_display,
+               float texcoord_x1, GLuint prog, AVFrame *frame, bool want_new_packet,
+               bool packet_valid, int frameno, EGLSurface egl_surface, float texcoord_y1,
+               bool texture_size_valid, int video_stream, bool running, AVFormatContext *input_ctx,
+               AVCodecContext *decoder_ctx, Atom WM_DELETE_WINDOW, AVPacket packet)
+{
+  LOOKUP_FUNCTION(PFNEGLCREATEIMAGEKHRPROC,            eglCreateImageKHR)
+  LOOKUP_FUNCTION(PFNEGLDESTROYIMAGEKHRPROC,           eglDestroyImageKHR)
+  LOOKUP_FUNCTION(PFNGLEGLIMAGETARGETTEXTURE2DOESPROC, glEGLImageTargetTexture2DOES)
+
+  while (running) {
+      // handle X11 events
+      while (XPending(x_display)) {
+          XEvent ev;
+          XNextEvent(x_display, &ev);
+          switch (ev.type) {
+              case ClientMessage:
+                  if (((Atom) ev.xclient.data.l[0]) == WM_DELETE_WINDOW) {
+                      running = false;
+                  }
+                  break;
+              case KeyPress:
+                  switch (XLookupKeysym(&ev.xkey, 0)) {
+                      case 'q':
+                          running = false;
+                          break;
+                      case 'a':
+                          decoder_ctx->skip_frame = AVDISCARD_NONE;
+                          break;
+                      case 'b':
+                          decoder_ctx->skip_frame = AVDISCARD_NONREF;
+                          break;
+                      case 'p':
+                          decoder_ctx->skip_frame = AVDISCARD_BIDIR;
+                          break;
+                      default: break;
+                  }
+                  break;
+              case ConfigureNotify:
+                  resize_window(((XConfigureEvent*)&ev)->width, ((XConfigureEvent*)&ev)->height, decoder_ctx);
+                  break;
+              default:
+                  break;
+          }
+      }
+
+      // prepare frame and packet for re-use
+      if (packet_valid) { av_packet_unref(&packet); packet_valid = false; }
+
+      // read compressed data from stream and send it to the decoder
+      if (want_new_packet) {
+          if (av_read_frame(input_ctx, &packet) < 0) {
+              break;  // end of stream
+          }
+          packet_valid = true;
+          if (packet.stream_index != video_stream) {
+              continue;  // not a video packet
+          }
+          if (avcodec_send_packet(decoder_ctx, &packet) < 0) {
+              fail("avcodec_send_packet");
+          }
+          want_new_packet = false;
+      }
+
+      // retrieve a frame from the decoder
+      int ret = avcodec_receive_frame(decoder_ctx, frame);
+      if ((ret == AVERROR(EAGAIN)) || (ret == AVERROR_EOF)) {
+          want_new_packet = true;
+          continue;  // no more frames ready from the decoder -> decode new ones
+      }
+      else if (ret < 0) {
+          fail("avcodec_receive_frame");
+      }
+      VASurfaceID va_surface = (uintptr_t)frame->data[3];
+      printf("\rframe #%d (%c) ", ++frameno, av_get_picture_type_char(frame->pict_type));
+      fflush(stdout);
+
+      // convert the frame into a pair of DRM-PRIME FDs
+      VADRMPRIMESurfaceDescriptor prime;
+      if (vaExportSurfaceHandle(va_display, va_surface,
+          VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME_2,
+          VA_EXPORT_SURFACE_READ_ONLY |
+          #if USE_LAYERS
+              VA_EXPORT_SURFACE_SEPARATE_LAYERS,
+          #else
+              VA_EXPORT_SURFACE_COMPOSED_LAYERS,
+          #endif
+          &prime) != VA_STATUS_SUCCESS)
+          { fail("vaExportSurfaceHandle"); }
+      if (prime.fourcc != VA_FOURCC_NV12) {
+          fail("export format check");  // we only support NV12 here
+      }
+      vaSyncSurface(va_display, va_surface);
+
+      // check the actual size of the frame
+      if (!texture_size_valid) {
+          texcoord_x1 = (float)((double) decoder_ctx->width  / (double) prime.width);
+          texcoord_y1 = (float)((double) decoder_ctx->height / (double) prime.height);
+          glUniform2f(glGetUniformLocation(prog, "uTexCoordScale"), texcoord_x1, texcoord_y1);
+          texture_size_valid = true;
+      }
+
+      // import the frame into OpenGL
+      EGLImage images[2];
+      for (int i = 0;  i < 2;  ++i) {
+          static const uint32_t formats[2] = { DRM_FORMAT_R8, DRM_FORMAT_GR88 };
+          #if USE_LAYERS
+              #define LAYER i
+              #define PLANE 0
+              if (prime.layers[i].drm_format != formats[i]) {
+                  fail("expected DRM format check");
+              }
+          #else
+              #define LAYER 0
+              #define PLANE i
+          #endif
+          EGLint img_attr[] = {
+              EGL_LINUX_DRM_FOURCC_EXT,      formats[i],
+              EGL_WIDTH,                     prime.width  / (i + 1),  // half size
+              EGL_HEIGHT,                    prime.height / (i + 1),  // for chroma
+              EGL_DMA_BUF_PLANE0_FD_EXT,     prime.objects[prime.layers[LAYER].object_index[PLANE]].fd,
+              EGL_DMA_BUF_PLANE0_OFFSET_EXT, prime.layers[LAYER].offset[PLANE],
+              EGL_DMA_BUF_PLANE0_PITCH_EXT,  prime.layers[LAYER].pitch[PLANE],
+              EGL_NONE
+          };
+          images[i] = eglCreateImageKHR(egl_display, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, NULL, img_attr);
+          if (!images[i]) {
+              fail(i ? "chroma eglCreateImageKHR" : "luma eglCreateImageKHR");
+          }
+          glActiveTexture(GL_TEXTURE0 + i);
+          glBindTexture(GL_TEXTURE_2D, textures[i]);
+          while (glGetError()) {}
+          glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, images[i]);
+          if (glGetError()) {
+              fail("glEGLImageTargetTexture2DOES");
+          }
+      }
+      for (int i = 0;  i < (int)prime.num_objects;  ++i) {
+          close(prime.objects[i].fd);
+      }
+
+      // draw the frame
+      glClear(GL_COLOR_BUFFER_BIT);
+      while (glGetError()) {}
+      glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+      if (glGetError()) { fail("drawing"); }
+
+      // display the frame
+         eglSwapBuffers(egl_display, egl_surface);
+
+      // clean up the interop images
+      for (int i = 0;  i < 2;  ++i) {
+          glActiveTexture(GL_TEXTURE0 + i);
+          glBindTexture(GL_TEXTURE_2D, 0);
+          eglDestroyImageKHR(egl_display, images[i]);
+      }
+  }
+}
+
 int main(int argc, char* argv[]) {
 	show_help(argc, argv);
 	Display* x_display = open_x11_display();
@@ -352,10 +511,6 @@ int main(int argc, char* argv[]) {
     create_opengl_ctx(&egl_context, egl_display, &egl_surface, window);
 
     dump_opengl_cfg();
-
-    LOOKUP_FUNCTION(PFNEGLCREATEIMAGEKHRPROC,            eglCreateImageKHR)
-    LOOKUP_FUNCTION(PFNEGLDESTROYIMAGEKHRPROC,           eglDestroyImageKHR)
-    LOOKUP_FUNCTION(PFNGLEGLIMAGETARGETTEXTURE2DOESPROC, glEGLImageTargetTexture2DOES)
 
     GLuint prog = opengl_shader_setup();
 
@@ -381,153 +536,10 @@ int main(int argc, char* argv[]) {
     int frameno = 0;
     bool texture_size_valid = false;
     float texcoord_x1 = 1.0f, texcoord_y1 = 1.0f;
-    while (running) {
-        // handle X11 events
-        while (XPending(x_display)) {
-            XEvent ev;
-            XNextEvent(x_display, &ev);
-            switch (ev.type) {
-                case ClientMessage:
-                    if (((Atom) ev.xclient.data.l[0]) == WM_DELETE_WINDOW) {
-                        running = false;
-                    }
-                    break;
-                case KeyPress:
-                    switch (XLookupKeysym(&ev.xkey, 0)) {
-                        case 'q':
-                            running = false;
-                            break;
-                        case 'a':
-                            decoder_ctx->skip_frame = AVDISCARD_NONE;
-                            break;
-                        case 'b':
-                            decoder_ctx->skip_frame = AVDISCARD_NONREF;
-                            break;
-                        case 'p':
-                            decoder_ctx->skip_frame = AVDISCARD_BIDIR;
-                            break;
-                        default: break;
-                    }
-                    break;
-                case ConfigureNotify:
-                    resize_window(((XConfigureEvent*)&ev)->width, ((XConfigureEvent*)&ev)->height, decoder_ctx);
-                    break;
-                default:
-                    break;
-            }
-        }
-
-        // prepare frame and packet for re-use
-        if (packet_valid) { av_packet_unref(&packet); packet_valid = false; }
-
-        // read compressed data from stream and send it to the decoder
-        if (want_new_packet) {
-            if (av_read_frame(input_ctx, &packet) < 0) {
-                break;  // end of stream
-            }
-            packet_valid = true;
-            if (packet.stream_index != video_stream) {
-                continue;  // not a video packet
-            }
-            if (avcodec_send_packet(decoder_ctx, &packet) < 0) {
-                fail("avcodec_send_packet");
-            }
-            want_new_packet = false;
-        }
-
-        // retrieve a frame from the decoder
-        int ret = avcodec_receive_frame(decoder_ctx, frame);
-        if ((ret == AVERROR(EAGAIN)) || (ret == AVERROR_EOF)) {
-            want_new_packet = true;
-            continue;  // no more frames ready from the decoder -> decode new ones
-        }
-        else if (ret < 0) {
-            fail("avcodec_receive_frame");
-        }
-        VASurfaceID va_surface = (uintptr_t)frame->data[3];
-        printf("\rframe #%d (%c) ", ++frameno, av_get_picture_type_char(frame->pict_type));
-        fflush(stdout);
-
-        // convert the frame into a pair of DRM-PRIME FDs
-        VADRMPRIMESurfaceDescriptor prime;
-        if (vaExportSurfaceHandle(va_display, va_surface,
-            VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME_2,
-            VA_EXPORT_SURFACE_READ_ONLY |
-            #if USE_LAYERS
-                VA_EXPORT_SURFACE_SEPARATE_LAYERS,
-            #else
-                VA_EXPORT_SURFACE_COMPOSED_LAYERS,
-            #endif
-            &prime) != VA_STATUS_SUCCESS)
-            { fail("vaExportSurfaceHandle"); }
-        if (prime.fourcc != VA_FOURCC_NV12) {
-            fail("export format check");  // we only support NV12 here
-        }
-        vaSyncSurface(va_display, va_surface);
-
-        // check the actual size of the frame
-        if (!texture_size_valid) {
-            texcoord_x1 = (float)((double) decoder_ctx->width  / (double) prime.width);
-            texcoord_y1 = (float)((double) decoder_ctx->height / (double) prime.height);
-            glUniform2f(glGetUniformLocation(prog, "uTexCoordScale"), texcoord_x1, texcoord_y1);
-            texture_size_valid = true;
-        }
-
-        // import the frame into OpenGL
-        EGLImage images[2];
-        for (int i = 0;  i < 2;  ++i) {
-            static const uint32_t formats[2] = { DRM_FORMAT_R8, DRM_FORMAT_GR88 };
-            #if USE_LAYERS
-                #define LAYER i
-                #define PLANE 0
-                if (prime.layers[i].drm_format != formats[i]) {
-                    fail("expected DRM format check");
-                }
-            #else
-                #define LAYER 0
-                #define PLANE i
-            #endif
-            EGLint img_attr[] = {
-                EGL_LINUX_DRM_FOURCC_EXT,      formats[i],
-                EGL_WIDTH,                     prime.width  / (i + 1),  // half size
-                EGL_HEIGHT,                    prime.height / (i + 1),  // for chroma
-                EGL_DMA_BUF_PLANE0_FD_EXT,     prime.objects[prime.layers[LAYER].object_index[PLANE]].fd,
-                EGL_DMA_BUF_PLANE0_OFFSET_EXT, prime.layers[LAYER].offset[PLANE],
-                EGL_DMA_BUF_PLANE0_PITCH_EXT,  prime.layers[LAYER].pitch[PLANE],
-                EGL_NONE
-            };
-            images[i] = eglCreateImageKHR(egl_display, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, NULL, img_attr);
-            if (!images[i]) {
-                fail(i ? "chroma eglCreateImageKHR" : "luma eglCreateImageKHR");
-            }
-            glActiveTexture(GL_TEXTURE0 + i);
-            glBindTexture(GL_TEXTURE_2D, textures[i]);
-            while (glGetError()) {}
-            glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, images[i]);
-            if (glGetError()) {
-                fail("glEGLImageTargetTexture2DOES");
-            }
-        }
-        for (int i = 0;  i < (int)prime.num_objects;  ++i) {
-            close(prime.objects[i].fd);
-        }
-
-        // draw the frame
-        glClear(GL_COLOR_BUFFER_BIT);
-        while (glGetError()) {}
-        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-        if (glGetError()) { fail("drawing"); }
-
-        // display the frame
-           eglSwapBuffers(egl_display, egl_surface);
-
-        // clean up the interop images
-        for (int i = 0;  i < 2;  ++i) {
-            glActiveTexture(GL_TEXTURE0 + i);
-            glBindTexture(GL_TEXTURE_2D, 0);
-            eglDestroyImageKHR(egl_display, images[i]);
-        }
-    }
+    main_loop(x_display, textures, egl_display, va_display, texcoord_x1, prog,
+              frame, want_new_packet, packet_valid, frameno, egl_surface,
+              texcoord_y1, texture_size_valid, video_stream, running,
+              input_ctx, decoder_ctx, WM_DELETE_WINDOW, packet);
 
     // normally, we'd flush the decoder here to ensure we've shown *all* frames
     // of the video, but this is left out as an exercise for the reader ;)
