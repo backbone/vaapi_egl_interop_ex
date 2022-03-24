@@ -255,6 +255,11 @@ void dump_opengl_cfg()
   printf("OpenGL version:  %s\n", glGetString(GL_VERSION));
 }
 
+// look up required EGL and OpenGL extension functions
+#define LOOKUP_FUNCTION(type, func) \
+    type func = (type) eglGetProcAddress(#func); \
+    if (!func) { fail("eglGetProcAddress(" #func ")"); }
+
 int main(int argc, char* argv[]) {
 	show_help(argc, argv);
 	Display* x_display = open_x11_display();
@@ -279,10 +284,6 @@ int main(int argc, char* argv[]) {
 
     dump_opengl_cfg();
 
-    // look up required EGL and OpenGL extension functions
-    #define LOOKUP_FUNCTION(type, func) \
-        type func = (type) eglGetProcAddress(#func); \
-        if (!func) { fail("eglGetProcAddress(" #func ")"); }
     LOOKUP_FUNCTION(PFNEGLCREATEIMAGEKHRPROC,            eglCreateImageKHR)
     LOOKUP_FUNCTION(PFNEGLDESTROYIMAGEKHRPROC,           eglDestroyImageKHR)
     LOOKUP_FUNCTION(PFNGLEGLIMAGETARGETTEXTURE2DOESPROC, glEGLImageTargetTexture2DOES)
