@@ -260,6 +260,64 @@ void dump_opengl_cfg()
     type func = (type) eglGetProcAddress(#func); \
     if (!func) { fail("eglGetProcAddress(" #func ")"); }
 
+// OpenGL shader setup
+GLuint opengl_shader_setup()
+{
+  GLuint vao;                   // OpenGL Core Profile requires
+  LOOKUP_FUNCTION(PFNGLGENVERTEXARRAYSPROC,            glGenVertexArrays);
+  glGenVertexArrays(1, &vao);   // using VAOs even in trivial cases,
+  LOOKUP_FUNCTION(PFNGLBINDVERTEXARRAYPROC,            glBindVertexArray);
+  glBindVertexArray(vao);       // so let's set up a dummy VAO
+  #define DECLARE_YUV2RGB_MATRIX_GLSL \
+      "const mat4 yuv2rgb = mat4(\n" \
+      "    vec4(  1.1644,  1.1644,  1.1644,  0.0000 ),\n" \
+      "    vec4(  0.0000, -0.2132,  2.1124,  0.0000 ),\n" \
+      "    vec4(  1.7927, -0.5329,  0.0000,  0.0000 ),\n" \
+      "    vec4( -0.9729,  0.3015, -1.1334,  1.0000 ));"
+  const char *vs_src =
+           "#version 130"
+      "\n" "const vec2 coords[4] = vec2[]( vec2(0.,0.), vec2(1.,0.), vec2(0.,1.), vec2(1.,1.) );"
+      "\n" "uniform vec2 uTexCoordScale;"
+      "\n" "out vec2 vTexCoord;"
+      "\n" "void main() {"
+      "\n" "    vec2 c = coords[gl_VertexID];"
+      "\n" "    vTexCoord = c * uTexCoordScale;"
+      "\n" "    gl_Position = vec4(c * vec2(2.,-2.) + vec2(-1.,1.), 0., 1.);"
+      "\n" "}";
+  const char *fs_src =
+           "#version 130"
+      "\n" "in vec2 vTexCoord;"
+      "\n" "uniform sampler2D uTexY, uTexC;"
+      "\n" DECLARE_YUV2RGB_MATRIX_GLSL
+      "\n" "out vec4 oColor;"
+      "\n" "void main() {"
+      "\n" "    oColor = yuv2rgb * vec4(texture(uTexY, vTexCoord).x, "
+                                       "texture(uTexC, vTexCoord).xy, 1.);"
+      "\n" "}";
+  GLuint prog = glCreateProgram();
+  GLuint vs = glCreateShader(GL_VERTEX_SHADER);
+  GLuint fs = glCreateShader(GL_FRAGMENT_SHADER);
+  if (!prog) { fail("glCreateProgram"); }
+  if (!vs || !fs) { fail("glCreateShader"); }
+  glShaderSource(vs, 1, &vs_src, NULL);
+  glShaderSource(fs, 1, &fs_src, NULL);
+  GLint ok;
+  while (glGetError()) {}
+  glCompileShader(vs);  glGetShaderiv(vs, GL_COMPILE_STATUS, &ok);
+  if (glGetError() || (ok != GL_TRUE)) { fail("glCompileShader(GL_VERTEX_SHADER)"); }
+  glCompileShader(fs); glGetShaderiv(fs, GL_COMPILE_STATUS, &ok);
+  if (glGetError() || (ok != GL_TRUE)) { fail("glCompileShader(GL_FRAGMENT_SHADER)"); }
+  glAttachShader(prog, vs);
+  glAttachShader(prog, fs);
+  glLinkProgram(prog);
+  if (glGetError()) { fail("glLinkProgram"); }
+  glUseProgram(prog);
+  glUniform1i(glGetUniformLocation(prog, "uTexY"), 0);
+  glUniform1i(glGetUniformLocation(prog, "uTexC"), 1);
+
+  return prog;
+}
+
 int main(int argc, char* argv[]) {
 	show_help(argc, argv);
 	Display* x_display = open_x11_display();
@@ -287,60 +345,8 @@ int main(int argc, char* argv[]) {
     LOOKUP_FUNCTION(PFNEGLCREATEIMAGEKHRPROC,            eglCreateImageKHR)
     LOOKUP_FUNCTION(PFNEGLDESTROYIMAGEKHRPROC,           eglDestroyImageKHR)
     LOOKUP_FUNCTION(PFNGLEGLIMAGETARGETTEXTURE2DOESPROC, glEGLImageTargetTexture2DOES)
-    LOOKUP_FUNCTION(PFNGLGENVERTEXARRAYSPROC,            glGenVertexArrays);
-    LOOKUP_FUNCTION(PFNGLBINDVERTEXARRAYPROC,            glBindVertexArray);
 
-    // OpenGL shader setup
-    #define DECLARE_YUV2RGB_MATRIX_GLSL \
-        "const mat4 yuv2rgb = mat4(\n" \
-        "    vec4(  1.1644,  1.1644,  1.1644,  0.0000 ),\n" \
-        "    vec4(  0.0000, -0.2132,  2.1124,  0.0000 ),\n" \
-        "    vec4(  1.7927, -0.5329,  0.0000,  0.0000 ),\n" \
-        "    vec4( -0.9729,  0.3015, -1.1334,  1.0000 ));"
-
-    GLuint vao;                   // OpenGL Core Profile requires
-    glGenVertexArrays(1, &vao);   // using VAOs even in trivial cases,
-    glBindVertexArray(vao);       // so let's set up a dummy VAO
-    const char *vs_src =
-             "#version 130"
-        "\n" "const vec2 coords[4] = vec2[]( vec2(0.,0.), vec2(1.,0.), vec2(0.,1.), vec2(1.,1.) );"
-        "\n" "uniform vec2 uTexCoordScale;"
-        "\n" "out vec2 vTexCoord;"
-        "\n" "void main() {"
-        "\n" "    vec2 c = coords[gl_VertexID];"
-        "\n" "    vTexCoord = c * uTexCoordScale;"
-        "\n" "    gl_Position = vec4(c * vec2(2.,-2.) + vec2(-1.,1.), 0., 1.);"
-        "\n" "}";
-    const char *fs_src =
-             "#version 130"
-        "\n" "in vec2 vTexCoord;"
-        "\n" "uniform sampler2D uTexY, uTexC;"
-        "\n" DECLARE_YUV2RGB_MATRIX_GLSL
-        "\n" "out vec4 oColor;"
-        "\n" "void main() {"
-        "\n" "    oColor = yuv2rgb * vec4(texture(uTexY, vTexCoord).x, "
-                                         "texture(uTexC, vTexCoord).xy, 1.);"
-        "\n" "}";
-    GLuint prog = glCreateProgram();
-    GLuint vs = glCreateShader(GL_VERTEX_SHADER);
-    GLuint fs = glCreateShader(GL_FRAGMENT_SHADER);
-    if (!prog) { fail("glCreateProgram"); }
-    if (!vs || !fs) { fail("glCreateShader"); }
-    glShaderSource(vs, 1, &vs_src, NULL);
-    glShaderSource(fs, 1, &fs_src, NULL);
-    GLint ok;
-    while (glGetError()) {}
-    glCompileShader(vs);  glGetShaderiv(vs, GL_COMPILE_STATUS, &ok);
-    if (glGetError() || (ok != GL_TRUE)) { fail("glCompileShader(GL_VERTEX_SHADER)"); }
-    glCompileShader(fs); glGetShaderiv(fs, GL_COMPILE_STATUS, &ok);
-    if (glGetError() || (ok != GL_TRUE)) { fail("glCompileShader(GL_FRAGMENT_SHADER)"); }
-    glAttachShader(prog, vs);
-    glAttachShader(prog, fs);
-    glLinkProgram(prog);
-    if (glGetError()) { fail("glLinkProgram"); }
-    glUseProgram(prog);
-    glUniform1i(glGetUniformLocation(prog, "uTexY"), 0);
-    glUniform1i(glGetUniformLocation(prog, "uTexC"), 1);
+    GLuint prog = opengl_shader_setup();
 
     // OpenGL texture setup
     GLuint textures[2];
