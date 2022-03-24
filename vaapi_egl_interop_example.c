@@ -211,6 +211,42 @@ EGLDisplay initialize_egl(Display* x_display)
   return egl_display;
 }
 
+// create the OpenGL rendering context using EGL
+void create_opengl_ctx(EGLContext *egl_context, EGLDisplay egl_display, EGLSurface *egl_surface, Window window)
+{
+  EGLint visual_attr[] = {
+      EGL_SURFACE_TYPE,    EGL_WINDOW_BIT,
+      EGL_RED_SIZE,        8,
+      EGL_GREEN_SIZE,      8,
+      EGL_BLUE_SIZE,       8,
+      EGL_ALPHA_SIZE,      8,
+      EGL_RENDERABLE_TYPE, EGL_OPENGL_BIT,
+      EGL_NONE
+  };
+  EGLConfig cfg;
+  EGLint cfg_count;
+  if (!eglChooseConfig(egl_display, visual_attr, &cfg, 1, &cfg_count) || (cfg_count < 1)) {
+      fail("eglChooseConfig");
+  }
+  *egl_surface = eglCreateWindowSurface(egl_display, cfg, window, NULL);
+  if (*egl_surface == EGL_NO_SURFACE) {
+      fail("eglCreateWindowSurface");
+  }
+  EGLint ctx_attr[] = {
+      EGL_CONTEXT_OPENGL_PROFILE_MASK,
+          EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT,
+          EGL_CONTEXT_MAJOR_VERSION, CORE_PROFILE_MAJOR_VERSION,
+          EGL_CONTEXT_MINOR_VERSION, CORE_PROFILE_MINOR_VERSION,
+      EGL_NONE
+  };
+  *egl_context = eglCreateContext(egl_display, cfg, EGL_NO_CONTEXT, ctx_attr);
+  if (*egl_context == EGL_NO_CONTEXT) {
+      fail("eglCreateContext");
+  }
+  eglMakeCurrent(egl_display, *egl_surface, *egl_surface, *egl_context);
+  eglSwapInterval(egl_display, SWAP_INTERVAL);
+}
+
 int main(int argc, char* argv[]) {
 	show_help(argc, argv);
 	Display* x_display = open_x11_display();
@@ -229,40 +265,9 @@ int main(int argc, char* argv[]) {
 
     EGLDisplay egl_display = initialize_egl(x_display);
 
-    // create the OpenGL rendering context using EGL
     EGLSurface egl_surface;
     EGLContext egl_context;
-    EGLint visual_attr[] = {
-        EGL_SURFACE_TYPE,    EGL_WINDOW_BIT,
-        EGL_RED_SIZE,        8,
-        EGL_GREEN_SIZE,      8,
-        EGL_BLUE_SIZE,       8,
-        EGL_ALPHA_SIZE,      8,
-        EGL_RENDERABLE_TYPE, EGL_OPENGL_BIT,
-        EGL_NONE
-    };
-    EGLConfig cfg;
-    EGLint cfg_count;
-    if (!eglChooseConfig(egl_display, visual_attr, &cfg, 1, &cfg_count) || (cfg_count < 1)) {
-        fail("eglChooseConfig");
-    }
-    egl_surface = eglCreateWindowSurface(egl_display, cfg, window, NULL);
-    if (egl_surface == EGL_NO_SURFACE) {
-        fail("eglCreateWindowSurface");
-    }
-    EGLint ctx_attr[] = {
-        EGL_CONTEXT_OPENGL_PROFILE_MASK,
-            EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT,
-            EGL_CONTEXT_MAJOR_VERSION, CORE_PROFILE_MAJOR_VERSION,
-            EGL_CONTEXT_MINOR_VERSION, CORE_PROFILE_MINOR_VERSION,
-        EGL_NONE
-    };
-    egl_context = eglCreateContext(egl_display, cfg, EGL_NO_CONTEXT, ctx_attr);
-    if (egl_context == EGL_NO_CONTEXT) {
-        fail("eglCreateContext");
-    }
-    eglMakeCurrent(egl_display, egl_surface, egl_surface, egl_context);
-    eglSwapInterval(egl_display, SWAP_INTERVAL);
+    create_opengl_ctx(&egl_context, egl_display, &egl_surface, window);
 
     // dump OpenGL configuration (for reference)
     printf("OpenGL vendor:   %s\n", glGetString(GL_VENDOR));
