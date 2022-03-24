@@ -150,6 +150,26 @@ void open_source(AVCodecContext **decoder_ctx, int *video_stream, char* argv[], 
   }
 }
 
+void populate_context(AVCodec *decoder, VADisplay va_display, AVCodecContext *decoder_ctx, AVBufferRef **hw_device_ctx)
+{
+  *hw_device_ctx = av_hwdevice_ctx_alloc(AV_HWDEVICE_TYPE_VAAPI);
+  if (!*hw_device_ctx) {
+      fail("av_hwdevice_ctx_alloc");
+  }
+  AVHWDeviceContext *hwctx = (void*) (*hw_device_ctx)->data;
+  AVVAAPIDeviceContext *vactx = hwctx->hwctx;
+  vactx->display = va_display;
+  if (av_hwdevice_ctx_init(*hw_device_ctx) < 0) {
+      fail("av_hwdevice_ctx_init");
+  }
+  decoder_ctx->get_format = get_hw_format;
+  decoder_ctx->hw_device_ctx = av_buffer_ref(*hw_device_ctx);
+  if (avcodec_open2(decoder_ctx, decoder, NULL) < 0) {
+      fail("avcodec_open2");
+  }
+  printf("Opened input video stream: %dx%d\n", decoder_ctx->width, decoder_ctx->height);
+}
+
 int main(int argc, char* argv[]) {
 	show_help(argc, argv);
 	Display* x_display = open_x11_display();
@@ -164,22 +184,7 @@ int main(int argc, char* argv[]) {
     open_source(&decoder_ctx, &video_stream, argv, &input_ctx, &decoder);
     // use av_hwdevice_ctx_alloc() and populate the underlying structure
     // to use the VA-API context ("display") we created before
-    hw_device_ctx = av_hwdevice_ctx_alloc(AV_HWDEVICE_TYPE_VAAPI);
-    if (!hw_device_ctx) {
-        fail("av_hwdevice_ctx_alloc");
-    }
-    AVHWDeviceContext *hwctx = (void*) hw_device_ctx->data;
-    AVVAAPIDeviceContext *vactx = hwctx->hwctx;
-    vactx->display = va_display;
-    if (av_hwdevice_ctx_init(hw_device_ctx) < 0) {
-        fail("av_hwdevice_ctx_init");
-    }
-    decoder_ctx->get_format = get_hw_format;
-    decoder_ctx->hw_device_ctx = av_buffer_ref(hw_device_ctx);
-    if (avcodec_open2(decoder_ctx, decoder, NULL) < 0) {
-        fail("avcodec_open2");
-    }
-    printf("Opened input video stream: %dx%d\n", decoder_ctx->width, decoder_ctx->height);
+    populate_context(decoder, va_display, decoder_ctx, &hw_device_ctx);
 
     // create X11 window
     Window window;
