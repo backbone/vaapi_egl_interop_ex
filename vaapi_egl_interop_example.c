@@ -247,6 +247,14 @@ void create_opengl_ctx(EGLContext *egl_context, EGLDisplay egl_display, EGLSurfa
   eglSwapInterval(egl_display, SWAP_INTERVAL);
 }
 
+// dump OpenGL configuration (for reference)
+void dump_opengl_cfg()
+{
+  printf("OpenGL vendor:   %s\n", glGetString(GL_VENDOR));
+  printf("OpenGL renderer: %s\n", glGetString(GL_RENDERER));
+  printf("OpenGL version:  %s\n", glGetString(GL_VERSION));
+}
+
 int main(int argc, char* argv[]) {
 	show_help(argc, argv);
 	Display* x_display = open_x11_display();
@@ -269,10 +277,7 @@ int main(int argc, char* argv[]) {
     EGLContext egl_context;
     create_opengl_ctx(&egl_context, egl_display, &egl_surface, window);
 
-    // dump OpenGL configuration (for reference)
-    printf("OpenGL vendor:   %s\n", glGetString(GL_VENDOR));
-    printf("OpenGL renderer: %s\n", glGetString(GL_RENDERER));
-    printf("OpenGL version:  %s\n", glGetString(GL_VERSION));
+    dump_opengl_cfg();
 
     // look up required EGL and OpenGL extension functions
     #define LOOKUP_FUNCTION(type, func) \
