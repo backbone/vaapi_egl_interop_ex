@@ -318,6 +318,17 @@ GLuint opengl_shader_setup()
   return prog;
 }
 
+// OpenGL texture setup
+void opengl_texture_setup(GLuint textures[2])
+{
+  glGenTextures(2, textures);
+  for (int i = 0;  i < 2;  ++i) {
+      glBindTexture(GL_TEXTURE_2D, textures[i]);
+      setup_texture();
+  }
+  glBindTexture(GL_TEXTURE_2D, 0);
+}
+
 int main(int argc, char* argv[]) {
 	show_help(argc, argv);
 	Display* x_display = open_x11_display();
@@ -348,14 +359,8 @@ int main(int argc, char* argv[]) {
 
     GLuint prog = opengl_shader_setup();
 
-    // OpenGL texture setup
     GLuint textures[2];
-    glGenTextures(2, textures);
-    for (int i = 0;  i < 2;  ++i) {
-        glBindTexture(GL_TEXTURE_2D, textures[i]);
-        setup_texture();
-    }
-    glBindTexture(GL_TEXTURE_2D, 0);
+    opengl_texture_setup(textures);
 
     // initial window size setup
     GLint vp[4];
