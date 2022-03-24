@@ -151,6 +151,8 @@ void open_source(AVCodecContext **decoder_ctx, int *video_stream, char* argv[], 
   }
 }
 
+// use av_hwdevice_ctx_alloc() and populate the underlying structure
+// to use the VA-API context ("display") we created before
 void populate_context(AVCodec *decoder, VADisplay va_display, AVCodecContext *decoder_ctx, AVBufferRef **hw_device_ctx)
 {
   *hw_device_ctx = av_hwdevice_ctx_alloc(AV_HWDEVICE_TYPE_VAAPI);
@@ -192,6 +194,23 @@ Atom create_x11_window(Display* x_display, AVCodecContext *decoder_ctx, Window *
   return WM_DELETE_WINDOW;
 }
 
+EGLDisplay initialize_egl(Display* x_display)
+{
+  EGLDisplay egl_display;
+  egl_display = eglGetDisplay((EGLNativeDisplayType)x_display);
+  if (egl_display == EGL_NO_DISPLAY) {
+      fail("eglGetDisplay");
+  }
+  if (!eglInitialize(egl_display, NULL, NULL)) {
+      fail("eglInitialize");
+  }
+  if (!eglBindAPI(EGL_OPENGL_API)) {
+      fail("eglBindAPI");
+  }
+
+  return egl_display;
+}
+
 int main(int argc, char* argv[]) {
 	show_help(argc, argv);
 	Display* x_display = open_x11_display();
@@ -203,26 +222,12 @@ int main(int argc, char* argv[]) {
     AVBufferRef *hw_device_ctx = NULL;
     int video_stream = -1;
     open_source(&decoder_ctx, &video_stream, argv, &input_ctx, &decoder);
-    // use av_hwdevice_ctx_alloc() and populate the underlying structure
-    // to use the VA-API context ("display") we created before
     populate_context(decoder, va_display, decoder_ctx, &hw_device_ctx);
 
-    // create X11 window
     Window window;
     Atom WM_DELETE_WINDOW = create_x11_window(x_display, decoder_ctx, &window);
 
-    // initialize EGL
-    EGLDisplay egl_display;
-    egl_display = eglGetDisplay((EGLNativeDisplayType)x_display);
-    if (egl_display == EGL_NO_DISPLAY) {
-        fail("eglGetDisplay");
-    }
-    if (!eglInitialize(egl_display, NULL, NULL)) {
-        fail("eglInitialize");
-    }
-    if (!eglBindAPI(EGL_OPENGL_API)) {
-        fail("eglBindAPI");
-    }
+    EGLDisplay egl_display = initialize_egl(x_display);
 
     // create the OpenGL rendering context using EGL
     EGLSurface egl_surface;
