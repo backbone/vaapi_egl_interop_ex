@@ -329,6 +329,43 @@ void opengl_texture_setup(GLuint textures[2])
   glBindTexture(GL_TEXTURE_2D, 0);
 }
 
+void handle_x11_events(Display* x_display, Atom WM_DELETE_WINDOW, bool *running, AVCodecContext *decoder_ctx) {
+  // handle X11 events
+  while (XPending(x_display)) {
+      XEvent ev;
+      XNextEvent(x_display, &ev);
+      switch (ev.type) {
+          case ClientMessage:
+              if (((Atom) ev.xclient.data.l[0]) == WM_DELETE_WINDOW) {
+                  *running = false;
+              }
+              break;
+          case KeyPress:
+              switch (XLookupKeysym(&ev.xkey, 0)) {
+                  case 'q':
+                      *running = false;
+                      break;
+                  case 'a':
+                      decoder_ctx->skip_frame = AVDISCARD_NONE;
+                      break;
+                  case 'b':
+                      decoder_ctx->skip_frame = AVDISCARD_NONREF;
+                      break;
+                  case 'p':
+                      decoder_ctx->skip_frame = AVDISCARD_BIDIR;
+                      break;
+                  default: break;
+              }
+              break;
+          case ConfigureNotify:
+              resize_window(((XConfigureEvent*)&ev)->width, ((XConfigureEvent*)&ev)->height, decoder_ctx);
+              break;
+          default:
+              break;
+      }
+  }
+}
+
 void main_loop(Display* x_display, GLuint textures[2], EGLDisplay egl_display, VADisplay va_display,
                float texcoord_x1, GLuint prog, AVFrame *frame, bool want_new_packet,
                bool packet_valid, int frameno, EGLSurface egl_surface, float texcoord_y1,
@@ -340,41 +377,7 @@ void main_loop(Display* x_display, GLuint textures[2], EGLDisplay egl_display, V
   LOOKUP_FUNCTION(PFNGLEGLIMAGETARGETTEXTURE2DOESPROC, glEGLImageTargetTexture2DOES)
 
   while (running) {
-      // handle X11 events
-      while (XPending(x_display)) {
-          XEvent ev;
-          XNextEvent(x_display, &ev);
-          switch (ev.type) {
-              case ClientMessage:
-                  if (((Atom) ev.xclient.data.l[0]) == WM_DELETE_WINDOW) {
-                      running = false;
-                  }
-                  break;
-              case KeyPress:
-                  switch (XLookupKeysym(&ev.xkey, 0)) {
-                      case 'q':
-                          running = false;
-                          break;
-                      case 'a':
-                          decoder_ctx->skip_frame = AVDISCARD_NONE;
-                          break;
-                      case 'b':
-                          decoder_ctx->skip_frame = AVDISCARD_NONREF;
-                          break;
-                      case 'p':
-                          decoder_ctx->skip_frame = AVDISCARD_BIDIR;
-                          break;
-                      default: break;
-                  }
-                  break;
-              case ConfigureNotify:
-                  resize_window(((XConfigureEvent*)&ev)->width, ((XConfigureEvent*)&ev)->height, decoder_ctx);
-                  break;
-              default:
-                  break;
-          }
-      }
-
+      handle_x11_events(x_display, WM_DELETE_WINDOW, &running, decoder_ctx);
       // prepare frame and packet for re-use
       if (packet_valid) { av_packet_unref(&packet); packet_valid = false; }
 
