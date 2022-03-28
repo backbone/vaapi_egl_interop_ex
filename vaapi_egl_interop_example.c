@@ -367,7 +367,7 @@ void handle_x11_events(Display* x_display, Atom WM_DELETE_WINDOW, bool *running,
 }
 
 void main_loop(Display* x_display, GLuint textures[2], EGLDisplay egl_display, VADisplay va_display,
-               float texcoord_x1, GLuint prog, AVFrame *frame, bool want_new_packet,
+               float texcoord_x1, GLuint prog, AVFrame *frame,
                bool packet_valid, int frameno, EGLSurface egl_surface, float texcoord_y1,
                bool texture_size_valid, int video_stream, bool running, AVFormatContext *input_ctx,
                AVCodecContext *decoder_ctx, Atom WM_DELETE_WINDOW, AVPacket packet)
@@ -375,9 +375,11 @@ void main_loop(Display* x_display, GLuint textures[2], EGLDisplay egl_display, V
   LOOKUP_FUNCTION(PFNEGLCREATEIMAGEKHRPROC,            eglCreateImageKHR)
   LOOKUP_FUNCTION(PFNEGLDESTROYIMAGEKHRPROC,           eglDestroyImageKHR)
   LOOKUP_FUNCTION(PFNGLEGLIMAGETARGETTEXTURE2DOESPROC, glEGLImageTargetTexture2DOES)
+  bool want_new_packet = true;
 
   while (running) {
       handle_x11_events(x_display, WM_DELETE_WINDOW, &running, decoder_ctx);
+
       // prepare frame and packet for re-use
       if (packet_valid) { av_packet_unref(&packet); packet_valid = false; }
 
@@ -534,13 +536,12 @@ int main(int argc, char* argv[]) {
     // main loop
     AVPacket packet;
     bool packet_valid = false;
-    bool want_new_packet = true;
     bool running = true;
     int frameno = 0;
     bool texture_size_valid = false;
     float texcoord_x1 = 1.0f, texcoord_y1 = 1.0f;
     main_loop(x_display, textures, egl_display, va_display, texcoord_x1, prog,
-              frame, want_new_packet, packet_valid, frameno, egl_surface,
+              frame, packet_valid, frameno, egl_surface,
               texcoord_y1, texture_size_valid, video_stream, running,
               input_ctx, decoder_ctx, WM_DELETE_WINDOW, packet);
 
