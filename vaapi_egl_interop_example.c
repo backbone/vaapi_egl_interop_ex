@@ -401,15 +401,56 @@ void convert_frame(VADisplay va_display, VASurfaceID va_surface, VADRMPRIMESurfa
       vaSyncSurface(va_display, va_surface);
 }
 
+// import the frame into OpenGL
+void import_into_gl(VADRMPRIMESurfaceDescriptor *prime, EGLDisplay egl_display,
+                    GLuint textures[2], EGLImage images[2]) {
+      LOOKUP_FUNCTION(PFNEGLCREATEIMAGEKHRPROC,            eglCreateImageKHR)
+      LOOKUP_FUNCTION(PFNGLEGLIMAGETARGETTEXTURE2DOESPROC, glEGLImageTargetTexture2DOES)
+      for (int i = 0;  i < 2;  ++i) {
+          static const uint32_t formats[2] = { DRM_FORMAT_R8, DRM_FORMAT_GR88 };
+          #if USE_LAYERS
+              #define LAYER i
+              #define PLANE 0
+              if (prime->layers[i].drm_format != formats[i]) {
+                  fail("expected DRM format check");
+              }
+          #else
+              #define LAYER 0
+              #define PLANE i
+          #endif
+          EGLint img_attr[] = {
+              EGL_LINUX_DRM_FOURCC_EXT,      formats[i],
+              EGL_WIDTH,                     prime->width  / (i + 1),  // half size
+              EGL_HEIGHT,                    prime->height / (i + 1),  // for chroma
+              EGL_DMA_BUF_PLANE0_FD_EXT,     prime->objects[prime->layers[LAYER].object_index[PLANE]].fd,
+              EGL_DMA_BUF_PLANE0_OFFSET_EXT, prime->layers[LAYER].offset[PLANE],
+              EGL_DMA_BUF_PLANE0_PITCH_EXT,  prime->layers[LAYER].pitch[PLANE],
+              EGL_NONE
+          };
+          images[i] = eglCreateImageKHR(egl_display, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, NULL, img_attr);
+          if (!images[i]) {
+              fail(i ? "chroma eglCreateImageKHR" : "luma eglCreateImageKHR");
+          }
+          glActiveTexture(GL_TEXTURE0 + i);
+          glBindTexture(GL_TEXTURE_2D, textures[i]);
+          while (glGetError()) {}
+          glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, images[i]);
+          if (glGetError()) {
+              fail("glEGLImageTargetTexture2DOES");
+          }
+      }
+      for (int i = 0;  i < (int)prime->num_objects;  ++i) {
+          close(prime->objects[i].fd);
+      }
+}
+
 void main_loop(Display* x_display, GLuint textures[2], EGLDisplay egl_display, VADisplay va_display,
                float texcoord_x1, GLuint prog, AVFrame *frame,
                bool packet_valid, EGLSurface egl_surface, float texcoord_y1,
                bool texture_size_valid, int video_stream, bool running, AVFormatContext *input_ctx,
                AVCodecContext *decoder_ctx, Atom WM_DELETE_WINDOW, AVPacket packet)
 {
-  LOOKUP_FUNCTION(PFNEGLCREATEIMAGEKHRPROC,            eglCreateImageKHR)
   LOOKUP_FUNCTION(PFNEGLDESTROYIMAGEKHRPROC,           eglDestroyImageKHR)
-  LOOKUP_FUNCTION(PFNGLEGLIMAGETARGETTEXTURE2DOESPROC, glEGLImageTargetTexture2DOES)
   bool want_new_packet = true;
   int frameno = 0;
 
@@ -448,44 +489,8 @@ void main_loop(Display* x_display, GLuint textures[2], EGLDisplay egl_display, V
           texture_size_valid = true;
       }
 
-      // import the frame into OpenGL
       EGLImage images[2];
-      for (int i = 0;  i < 2;  ++i) {
-          static const uint32_t formats[2] = { DRM_FORMAT_R8, DRM_FORMAT_GR88 };
-          #if USE_LAYERS
-              #define LAYER i
-              #define PLANE 0
-              if (prime.layers[i].drm_format != formats[i]) {
-                  fail("expected DRM format check");
-              }
-          #else
-              #define LAYER 0
-              #define PLANE i
-          #endif
-          EGLint img_attr[] = {
-              EGL_LINUX_DRM_FOURCC_EXT,      formats[i],
-              EGL_WIDTH,                     prime.width  / (i + 1),  // half size
-              EGL_HEIGHT,                    prime.height / (i + 1),  // for chroma
-              EGL_DMA_BUF_PLANE0_FD_EXT,     prime.objects[prime.layers[LAYER].object_index[PLANE]].fd,
-              EGL_DMA_BUF_PLANE0_OFFSET_EXT, prime.layers[LAYER].offset[PLANE],
-              EGL_DMA_BUF_PLANE0_PITCH_EXT,  prime.layers[LAYER].pitch[PLANE],
-              EGL_NONE
-          };
-          images[i] = eglCreateImageKHR(egl_display, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, NULL, img_attr);
-          if (!images[i]) {
-              fail(i ? "chroma eglCreateImageKHR" : "luma eglCreateImageKHR");
-          }
-          glActiveTexture(GL_TEXTURE0 + i);
-          glBindTexture(GL_TEXTURE_2D, textures[i]);
-          while (glGetError()) {}
-          glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, images[i]);
-          if (glGetError()) {
-              fail("glEGLImageTargetTexture2DOES");
-          }
-      }
-      for (int i = 0;  i < (int)prime.num_objects;  ++i) {
-          close(prime.objects[i].fd);
-      }
+      import_into_gl(&prime, egl_display, textures, images);
 
       // draw the frame
       glClear(GL_COLOR_BUFFER_BIT);
