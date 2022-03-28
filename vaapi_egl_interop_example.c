@@ -383,6 +383,24 @@ bool retrieve_frame(AVCodecContext *decoder_ctx, AVFrame *frame, bool *want_new_
   return true;
 }
 
+void convert_frame(VADisplay va_display, VASurfaceID va_surface, VADRMPRIMESurfaceDescriptor *prime) {
+	  // convert the frame into a pair of DRM-PRIME FDs
+      if (vaExportSurfaceHandle(va_display, va_surface,
+          VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME_2,
+          VA_EXPORT_SURFACE_READ_ONLY |
+          #if USE_LAYERS
+              VA_EXPORT_SURFACE_SEPARATE_LAYERS,
+          #else
+              VA_EXPORT_SURFACE_COMPOSED_LAYERS,
+          #endif
+          prime) != VA_STATUS_SUCCESS)
+          { fail("vaExportSurfaceHandle"); }
+      if (prime->fourcc != VA_FOURCC_NV12) {
+          fail("export format check");  // we only support NV12 here
+      }
+      vaSyncSurface(va_display, va_surface);
+}
+
 void main_loop(Display* x_display, GLuint textures[2], EGLDisplay egl_display, VADisplay va_display,
                float texcoord_x1, GLuint prog, AVFrame *frame,
                bool packet_valid, EGLSurface egl_surface, float texcoord_y1,
@@ -419,22 +437,8 @@ void main_loop(Display* x_display, GLuint textures[2], EGLDisplay egl_display, V
       VASurfaceID va_surface;
       if (!retrieve_frame(decoder_ctx, frame, &want_new_packet, &frameno, &va_surface)) continue;
 
-	  // convert the frame into a pair of DRM-PRIME FDs
       VADRMPRIMESurfaceDescriptor prime;
-      if (vaExportSurfaceHandle(va_display, va_surface,
-          VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME_2,
-          VA_EXPORT_SURFACE_READ_ONLY |
-          #if USE_LAYERS
-              VA_EXPORT_SURFACE_SEPARATE_LAYERS,
-          #else
-              VA_EXPORT_SURFACE_COMPOSED_LAYERS,
-          #endif
-          &prime) != VA_STATUS_SUCCESS)
-          { fail("vaExportSurfaceHandle"); }
-      if (prime.fourcc != VA_FOURCC_NV12) {
-          fail("export format check");  // we only support NV12 here
-      }
-      vaSyncSurface(va_display, va_surface);
+      convert_frame(va_display, va_surface, &prime);
 
       // check the actual size of the frame
       if (!texture_size_valid) {
