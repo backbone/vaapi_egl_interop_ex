@@ -1,6 +1,6 @@
 #if 0  // self-compiling code: chmod +x this file and run it like a script
 BINARY=vaapi_egl_interop_example
-gcc -Wall -Wextra -pedantic -Werror -g -fsanitize=address -o $BINARY $0 \
+gcc -std=c99 -g -fsanitize=address -o $BINARY $0 \
     `pkg-config libavcodec libavformat libavutil libva gl egl libdrm --cflags --libs` \
     -lX11 -lva-x11 -lva-drm || exit 1
 test "$1" = "--compile-only" && exit 0
