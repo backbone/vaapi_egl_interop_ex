@@ -564,6 +564,8 @@ int main(int argc, char* argv[]) {
     // normally, we'd flush the decoder here to ensure we've shown *all* frames
     // of the video, but this is left out as an exercise for the reader ;)
 
+    //printf("EXT = %s\n", eglQueryString(egl_display, EGL_EXTENSIONS));
+
     // clean up all the mess we made
     if (packet_valid) { av_packet_unref(&packet); }
     av_frame_free(&frame);
