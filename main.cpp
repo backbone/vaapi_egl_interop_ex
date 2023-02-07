@@ -1,3 +1,6 @@
+#include "mainwindow.h"
+#include <QApplication>
+
 #if 0  // self-compiling code: chmod +x this file and run it like a script
 BINARY=vaapi_egl_interop_example
 gcc -std=c99 -g -fsanitize=address -o $BINARY $0 \
@@ -384,7 +387,7 @@ bool retrieve_frame(AVCodecContext *decoder_ctx, AVFrame *frame, bool *want_new_
 }
 
 void convert_frame(VADisplay va_display, VASurfaceID va_surface, VADRMPRIMESurfaceDescriptor *prime) {
-	  // convert the frame into a pair of DRM-PRIME FDs
+      // convert the frame into a pair of DRM-PRIME FDs
       if (vaExportSurfaceHandle(va_display, va_surface,
           VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME_2,
           VA_EXPORT_SURFACE_READ_ONLY |
@@ -511,16 +514,18 @@ void main_loop(Display* x_display, GLuint textures[2], EGLDisplay egl_display, V
 }
 
 int main(int argc, char* argv[]) {
-	show_help(argc, argv);
-	Display* x_display = open_x11_display();
-	VADisplay va_display = initialize_vaapi(x_display);
+    show_help(argc, argv);
+    Display* x_display = open_x11_display();
+    VADisplay va_display = initialize_vaapi(x_display);
 
     AVFormatContext *input_ctx = NULL;
     AVCodec *decoder = NULL;
     AVCodecContext *decoder_ctx = NULL;
     AVBufferRef *hw_device_ctx = NULL;
     int video_stream = -1;
-    open_source(&decoder_ctx, &video_stream, argv, &input_ctx, &decoder);
+
+    char* path_to_video = "~/dssl/Roliki/hulk_1.avi";
+    open_source(&decoder_ctx, &video_stream, path_to_video, &input_ctx, &decoder);
     populate_context(decoder, va_display, decoder_ctx, &hw_device_ctx);
 
     Window window;
@@ -579,7 +584,13 @@ int main(int argc, char* argv[]) {
     avformat_close_input(&input_ctx);
     av_buffer_unref(&hw_device_ctx);
     vaTerminate(va_display);
-	// TODO: TO HERE
+    // TODO: TO HERE
     printf("\nBye.\n");
-    return 0;
+
+
+    QApplication a(argc, argv);
+    MainWindow w;
+    w.show();
+
+    return a.exec();
 }
